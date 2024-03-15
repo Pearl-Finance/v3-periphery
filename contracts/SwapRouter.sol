@@ -4,7 +4,8 @@ pragma abicoder v2;
 
 import '@uniswap/v3-core/contracts/libraries/SafeCast.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
-import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
+import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import './interfaces/IUniswapV3PoolExtended.sol';
 
 import './interfaces/ISwapRouter.sol';
 import './base/PeripheryImmutableState.sol';
@@ -44,8 +45,8 @@ contract SwapRouter is
         address tokenA,
         address tokenB,
         uint24 fee
-    ) private view returns (IUniswapV3Pool) {
-        return IUniswapV3Pool(PoolAddress.computeAddress(factory, PoolAddress.getPoolKey(tokenA, tokenB, fee)));
+    ) private view returns (IUniswapV3PoolExtended) {
+        return IUniswapV3PoolExtended(PoolAddress.computeAddress(factory, PoolAddress.getPoolKey(tokenA, tokenB, fee)));
     }
 
     struct SwapCallbackData {
@@ -83,11 +84,20 @@ contract SwapRouter is
         }
     }
 
+    struct SwapInputInternal {
+        int256 amountIn;
+        address recipient;
+        uint160 sqrtPriceLimitX96;
+        bool zeroForOne;
+        bool isFeeOnTransfer;
+    }
+
     /// @dev Performs a single exact input swap
     function exactInputInternal(
         uint256 amountIn,
         address recipient,
         uint160 sqrtPriceLimitX96,
+        bool isFeeOnTransfer,
         SwapCallbackData memory data
     ) private returns (uint256 amountOut) {
         // allow swapping to the router address with address 0
@@ -95,20 +105,47 @@ contract SwapRouter is
 
         (address tokenIn, address tokenOut, uint24 fee) = data.path.decodeFirstPool();
 
-        bool zeroForOne = tokenIn < tokenOut;
+        {
+            SwapInputInternal memory params =
+                SwapInputInternal({
+                    amountIn: amountIn.toInt256(),
+                    recipient: recipient,
+                    sqrtPriceLimitX96: sqrtPriceLimitX96,
+                    zeroForOne: tokenIn < tokenOut,
+                    isFeeOnTransfer: isFeeOnTransfer
+                });
 
-        (int256 amount0, int256 amount1) =
-            getPool(tokenIn, tokenOut, fee).swap(
-                recipient,
-                zeroForOne,
-                amountIn.toInt256(),
-                sqrtPriceLimitX96 == 0
-                    ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
-                    : sqrtPriceLimitX96,
-                abi.encode(data)
-            );
+            uint256 amountOutBefore = IERC20(tokenOut).balanceOf(address(this));
+            int256 amount0;
+            int256 amount1;
+            if (params.isFeeOnTransfer) {
+                (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swapFeeOnTransfer(
+                    msg.sender,
+                    params.recipient,
+                    params.zeroForOne,
+                    params.amountIn,
+                    params.sqrtPriceLimitX96 == 0
+                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        : params.sqrtPriceLimitX96,
+                    abi.encode(data)
+                );
+            } else {
+                (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swap(
+                    params.recipient,
+                    params.zeroForOne,
+                    params.amountIn,
+                    params.sqrtPriceLimitX96 == 0
+                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        : params.sqrtPriceLimitX96,
+                    abi.encode(data)
+                );
+            }
 
-        return uint256(-(zeroForOne ? amount1 : amount0));
+            amountOut = uint256(-(params.zeroForOne ? amount1 : amount0));
+            if (recipient == address(this) && amountOut > 0) {
+                amountOut = IERC20(tokenOut).balanceOf(address(this)) - amountOutBefore;
+            }
+        }
     }
 
     /// @inheritdoc ISwapRouter
@@ -123,6 +160,25 @@ contract SwapRouter is
             params.amountIn,
             params.recipient,
             params.sqrtPriceLimitX96,
+            false, // isFeeOnTransfer
+            SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
+        );
+        require(amountOut >= params.amountOutMinimum, 'Too little received');
+    }
+
+    /// @inheritdoc ISwapRouter
+    function exactInputSingleFeeOnTransfer(ExactInputSingleParams calldata params)
+        external
+        payable
+        override
+        checkDeadline(params.deadline)
+        returns (uint256 amountOut)
+    {
+        amountOut = exactInputInternal(
+            params.amountIn,
+            params.recipient,
+            params.sqrtPriceLimitX96,
+            true, // isFeeOnTransfer
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
         require(amountOut >= params.amountOutMinimum, 'Too little received');
@@ -136,6 +192,25 @@ contract SwapRouter is
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        return _extactInputHandler(params, false);
+    }
+
+    /// @inheritdoc ISwapRouter
+    function exactInputFeeOnTransfer(ExactInputParams calldata params)
+        external
+        payable
+        override
+        checkDeadline(params.deadline)
+        returns (uint256 amountOut)
+    {
+        return _extactInputHandler(params, true);
+    }
+
+    /// @dev Performs a exact input swap based on token type
+    function _extactInputHandler(ExactInputParams memory params, bool isFeeOnTransfer)
+        internal
+        returns (uint256 amountOut)
+    {
         address payer = msg.sender; // msg.sender pays for the first hop
 
         while (true) {
@@ -146,6 +221,7 @@ contract SwapRouter is
                 params.amountIn,
                 hasMultiplePools ? address(this) : params.recipient, // for intermediate swaps, this contract custodies
                 0,
+                isFeeOnTransfer,
                 SwapCallbackData({
                     path: params.path.getFirstPool(), // only the first pool in the path is necessary
                     payer: payer

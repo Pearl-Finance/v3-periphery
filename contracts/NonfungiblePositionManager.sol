@@ -72,7 +72,7 @@ contract NonfungiblePositionManager is
         address _factory,
         address _WETH9,
         address _tokenDescriptor_
-    ) ERC721Permit('Uniswap V3 Positions NFT-V1', 'UNI-V3-POS', '1') PeripheryImmutableState(_factory, _WETH9) {
+    ) ERC721Permit('Pearl Positions NFT', 'PEARL', '1') PeripheryImmutableState(_factory, _WETH9) {
         _tokenDescriptor = _tokenDescriptor_;
     }
 
@@ -132,13 +132,14 @@ contract NonfungiblePositionManager is
         checkDeadline(params.deadline)
         returns (
             uint256 tokenId,
-            uint128 liquidity,
+            uint128 actualLiquidity,
             uint256 amount0,
             uint256 amount1
         )
     {
         IUniswapV3Pool pool;
-        (liquidity, amount0, amount1, pool) = addLiquidity(
+        uint128 liquidity;
+        (liquidity, actualLiquidity, amount0, amount1, pool) = addLiquidity(
             AddLiquidityParams({
                 token0: params.token0,
                 token1: params.token1,
@@ -171,14 +172,14 @@ contract NonfungiblePositionManager is
             poolId: poolId,
             tickLower: params.tickLower,
             tickUpper: params.tickUpper,
-            liquidity: liquidity,
+            liquidity: actualLiquidity,
             feeGrowthInside0LastX128: feeGrowthInside0LastX128,
             feeGrowthInside1LastX128: feeGrowthInside1LastX128,
             tokensOwed0: 0,
             tokensOwed1: 0
         });
 
-        emit IncreaseLiquidity(tokenId, liquidity, amount0, amount1);
+        emit IncreaseLiquidity(tokenId, liquidity, actualLiquidity, amount0, amount1);
     }
 
     modifier isAuthorizedForToken(uint256 tokenId) {
@@ -199,9 +200,10 @@ contract NonfungiblePositionManager is
         external
         payable
         override
+        isAuthorizedForToken(params.tokenId)
         checkDeadline(params.deadline)
         returns (
-            uint128 liquidity,
+            uint128 actualLiquidity,
             uint256 amount0,
             uint256 amount1
         )
@@ -211,7 +213,8 @@ contract NonfungiblePositionManager is
         PoolAddress.PoolKey memory poolKey = _poolIdToPoolKey[position.poolId];
 
         IUniswapV3Pool pool;
-        (liquidity, amount0, amount1, pool) = addLiquidity(
+        uint128 liquidity;
+        (liquidity, actualLiquidity, amount0, amount1, pool) = addLiquidity(
             AddLiquidityParams({
                 token0: poolKey.token0,
                 token1: poolKey.token1,
@@ -248,9 +251,9 @@ contract NonfungiblePositionManager is
 
         position.feeGrowthInside0LastX128 = feeGrowthInside0LastX128;
         position.feeGrowthInside1LastX128 = feeGrowthInside1LastX128;
-        position.liquidity += liquidity;
+        position.liquidity += actualLiquidity;
 
-        emit IncreaseLiquidity(params.tokenId, liquidity, amount0, amount1);
+        emit IncreaseLiquidity(params.tokenId, liquidity, actualLiquidity, amount0, amount1);
     }
 
     /// @inheritdoc INonfungiblePositionManager

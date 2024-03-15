@@ -1,5 +1,39 @@
-artifacts/
+coverage
+coverage.json
+typechain
+
+#Hardhat files
+cache
+artifacts
+
+
+# for verify
+args.js
+.env
+
+# Foundry
 cache/
-crytic-export/
+
+# JS
 node_modules/
-typechain/
+pvkey.js
+
+# Hardhat files
+cache_hardhat/
+artifacts/
+tasks/
+crytic-export/
+
+# Hardhat plugin files
+typechain-types/
+
+
+abi
+build
+
+.tmp
+*.backup
+*.log
+*.DS_Store
+*.localhost.json
+*.txt

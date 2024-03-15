@@ -6,6 +6,7 @@ import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol';
 import '@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
 
+import '../interfaces/IUniswapV3PoolMint.sol';
 import '../libraries/PoolAddress.sol';
 import '../libraries/CallbackValidation.sol';
 import '../libraries/LiquidityAmounts.sol';
@@ -52,6 +53,7 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
         internal
         returns (
             uint128 liquidity,
+            uint128 actualLiquidity,
             uint256 amount0,
             uint256 amount1,
             IUniswapV3Pool pool
@@ -77,7 +79,8 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
             );
         }
 
-        (amount0, amount1) = pool.mint(
+        (amount0, amount1, actualLiquidity) = IUniswapV3PoolMint(address(pool)).mint(
+            msg.sender,
             params.recipient,
             params.tickLower,
             params.tickUpper,
