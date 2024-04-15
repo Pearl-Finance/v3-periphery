@@ -88,61 +88,50 @@ contract SwapRouter is
         int256 amountIn;
         address recipient;
         uint160 sqrtPriceLimitX96;
-        bool zeroForOne;
         bool isFeeOnTransfer;
     }
 
     /// @dev Performs a single exact input swap
-    function exactInputInternal(
-        uint256 amountIn,
-        address recipient,
-        uint160 sqrtPriceLimitX96,
-        bool isFeeOnTransfer,
-        SwapCallbackData memory data
-    ) private returns (uint256 amountOut) {
+    function exactInputInternal(SwapInputInternal memory params, SwapCallbackData memory data)
+        private
+        returns (uint256 amountOut)
+    {
         // allow swapping to the router address with address 0
-        if (recipient == address(0)) recipient = address(this);
+        if (params.recipient == address(0)) params.recipient = address(this);
 
         (address tokenIn, address tokenOut, uint24 fee) = data.path.decodeFirstPool();
 
         {
-            SwapInputInternal memory params =
-                SwapInputInternal({
-                    amountIn: amountIn.toInt256(),
-                    recipient: recipient,
-                    sqrtPriceLimitX96: sqrtPriceLimitX96,
-                    zeroForOne: tokenIn < tokenOut,
-                    isFeeOnTransfer: isFeeOnTransfer
-                });
-
+            bool zeroForOne = tokenIn < tokenOut;
             uint256 amountOutBefore = IERC20(tokenOut).balanceOf(address(this));
             int256 amount0;
             int256 amount1;
+
             if (params.isFeeOnTransfer) {
                 (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swapFeeOnTransfer(
                     msg.sender,
                     params.recipient,
-                    params.zeroForOne,
+                    zeroForOne,
                     params.amountIn,
                     params.sqrtPriceLimitX96 == 0
-                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                         : params.sqrtPriceLimitX96,
                     abi.encode(data)
                 );
             } else {
                 (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swap(
                     params.recipient,
-                    params.zeroForOne,
+                    zeroForOne,
                     params.amountIn,
                     params.sqrtPriceLimitX96 == 0
-                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                         : params.sqrtPriceLimitX96,
                     abi.encode(data)
                 );
             }
 
-            amountOut = uint256(-(params.zeroForOne ? amount1 : amount0));
-            if (recipient == address(this) && amountOut > 0) {
+            amountOut = uint256(-(zeroForOne ? amount1 : amount0));
+            if (params.recipient == address(this) && amountOut > 0) {
                 amountOut = IERC20(tokenOut).balanceOf(address(this)) - amountOutBefore;
             }
         }
@@ -156,11 +145,16 @@ contract SwapRouter is
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        SwapInputInternal memory inputParams =
+            SwapInputInternal({
+                amountIn: params.amountIn.toInt256(),
+                recipient: params.recipient,
+                sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+                isFeeOnTransfer: false
+            });
+
         amountOut = exactInputInternal(
-            params.amountIn,
-            params.recipient,
-            params.sqrtPriceLimitX96,
-            false, // isFeeOnTransfer
+            inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
         require(amountOut >= params.amountOutMinimum, 'Too little received');
@@ -174,13 +168,19 @@ contract SwapRouter is
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        SwapInputInternal memory inputParams =
+            SwapInputInternal({
+                amountIn: params.amountIn.toInt256(),
+                recipient: params.recipient,
+                sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+                isFeeOnTransfer: true
+            });
+
         amountOut = exactInputInternal(
-            params.amountIn,
-            params.recipient,
-            params.sqrtPriceLimitX96,
-            true, // isFeeOnTransfer
+            inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
+
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -216,12 +216,17 @@ contract SwapRouter is
         while (true) {
             bool hasMultiplePools = params.path.hasMultiplePools();
 
+            SwapInputInternal memory inputParams =
+                SwapInputInternal({
+                    amountIn: params.amountIn.toInt256(),
+                    recipient: hasMultiplePools ? address(this) : params.recipient, // for intermediate swaps, this contract custodies
+                    sqrtPriceLimitX96: 0,
+                    isFeeOnTransfer: isFeeOnTransfer
+                });
+
             // the outputs of prior swaps become the inputs to subsequent ones
             params.amountIn = exactInputInternal(
-                params.amountIn,
-                hasMultiplePools ? address(this) : params.recipient, // for intermediate swaps, this contract custodies
-                0,
-                isFeeOnTransfer,
+                inputParams,
                 SwapCallbackData({
                     path: params.path.getFirstPool(), // only the first pool in the path is necessary
                     payer: payer
