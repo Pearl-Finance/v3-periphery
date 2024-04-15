@@ -5,6 +5,8 @@ pragma abicoder v2;
 import '@uniswap/v3-core/contracts/libraries/SafeCast.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
+
 import './interfaces/IUniswapV3PoolExtended.sol';
 
 import './interfaces/ISwapRouter.sol';
@@ -26,7 +28,8 @@ contract SwapRouter is
     PeripheryValidation,
     PeripheryPaymentsWithFee,
     Multicall,
-    SelfPermit
+    SelfPermit,
+    ReentrancyGuard
 {
     using Path for bytes;
     using SafeCast for uint256;
@@ -88,61 +91,50 @@ contract SwapRouter is
         int256 amountIn;
         address recipient;
         uint160 sqrtPriceLimitX96;
-        bool zeroForOne;
         bool isFeeOnTransfer;
     }
 
     /// @dev Performs a single exact input swap
-    function exactInputInternal(
-        uint256 amountIn,
-        address recipient,
-        uint160 sqrtPriceLimitX96,
-        bool isFeeOnTransfer,
-        SwapCallbackData memory data
-    ) private returns (uint256 amountOut) {
+    function exactInputInternal(SwapInputInternal memory params, SwapCallbackData memory data)
+        private
+        returns (uint256 amountOut)
+    {
         // allow swapping to the router address with address 0
-        if (recipient == address(0)) recipient = address(this);
+        if (params.recipient == address(0)) params.recipient = address(this);
 
         (address tokenIn, address tokenOut, uint24 fee) = data.path.decodeFirstPool();
 
         {
-            SwapInputInternal memory params =
-                SwapInputInternal({
-                    amountIn: amountIn.toInt256(),
-                    recipient: recipient,
-                    sqrtPriceLimitX96: sqrtPriceLimitX96,
-                    zeroForOne: tokenIn < tokenOut,
-                    isFeeOnTransfer: isFeeOnTransfer
-                });
-
+            bool zeroForOne = tokenIn < tokenOut;
             uint256 amountOutBefore = IERC20(tokenOut).balanceOf(address(this));
             int256 amount0;
             int256 amount1;
+
             if (params.isFeeOnTransfer) {
                 (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swapFeeOnTransfer(
                     msg.sender,
                     params.recipient,
-                    params.zeroForOne,
+                    zeroForOne,
                     params.amountIn,
                     params.sqrtPriceLimitX96 == 0
-                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                         : params.sqrtPriceLimitX96,
                     abi.encode(data)
                 );
             } else {
                 (amount0, amount1) = getPool(tokenIn, tokenOut, fee).swap(
                     params.recipient,
-                    params.zeroForOne,
+                    zeroForOne,
                     params.amountIn,
                     params.sqrtPriceLimitX96 == 0
-                        ? (params.zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
+                        ? (zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1)
                         : params.sqrtPriceLimitX96,
                     abi.encode(data)
                 );
             }
 
-            amountOut = uint256(-(params.zeroForOne ? amount1 : amount0));
-            if (recipient == address(this) && amountOut > 0) {
+            amountOut = uint256(-(zeroForOne ? amount1 : amount0));
+            if (params.recipient == address(this) && amountOut > 0) {
                 amountOut = IERC20(tokenOut).balanceOf(address(this)) - amountOutBefore;
             }
         }
@@ -153,16 +145,26 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        SwapInputInternal memory inputParams =
+            SwapInputInternal({
+                amountIn: params.amountIn.toInt256(),
+                recipient: params.recipient,
+                sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+                isFeeOnTransfer: false
+            });
+
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
         amountOut = exactInputInternal(
-            params.amountIn,
-            params.recipient,
-            params.sqrtPriceLimitX96,
-            false, // isFeeOnTransfer
+            inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
+
+        // calculate the actual amount recieved by the user
+        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -171,16 +173,27 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
+        SwapInputInternal memory inputParams =
+            SwapInputInternal({
+                amountIn: params.amountIn.toInt256(),
+                recipient: params.recipient,
+                sqrtPriceLimitX96: params.sqrtPriceLimitX96,
+                isFeeOnTransfer: true
+            });
+
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
+
         amountOut = exactInputInternal(
-            params.amountIn,
-            params.recipient,
-            params.sqrtPriceLimitX96,
-            true, // isFeeOnTransfer
+            inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
+
+        // calculate the actual amount recieved by the user
+        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -189,6 +202,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -200,6 +214,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -216,12 +231,17 @@ contract SwapRouter is
         while (true) {
             bool hasMultiplePools = params.path.hasMultiplePools();
 
+            SwapInputInternal memory inputParams =
+                SwapInputInternal({
+                    amountIn: params.amountIn.toInt256(),
+                    recipient: hasMultiplePools ? address(this) : params.recipient, // for intermediate swaps, this contract custodies
+                    sqrtPriceLimitX96: 0,
+                    isFeeOnTransfer: isFeeOnTransfer
+                });
+
             // the outputs of prior swaps become the inputs to subsequent ones
             params.amountIn = exactInputInternal(
-                params.amountIn,
-                hasMultiplePools ? address(this) : params.recipient, // for intermediate swaps, this contract custodies
-                0,
-                isFeeOnTransfer,
+                inputParams,
                 SwapCallbackData({
                     path: params.path.getFirstPool(), // only the first pool in the path is necessary
                     payer: payer
@@ -280,9 +300,12 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
+        uint256 balanceBefore = IERC20(params.tokenIn).balanceOf(msg.sender);
+
         // avoid an SLOAD by using the swap return data
         amountIn = exactOutputInternal(
             params.amountOut,
@@ -291,6 +314,8 @@ contract SwapRouter is
             SwapCallbackData({path: abi.encodePacked(params.tokenOut, params.fee, params.tokenIn), payer: msg.sender})
         );
 
+        // calculate the actual amount utilised for the trade
+        amountIn = balanceBefore - IERC20(params.tokenIn).balanceOf(msg.sender);
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         // has to be reset even though we don't use it in the single hop case
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
@@ -301,9 +326,13 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
+        (, address tokenIn, ) = params.path.decodeFirstPool();
+        uint256 balanceBefore = IERC20(tokenIn).balanceOf(msg.sender);
+
         // it's okay that the payer is fixed to msg.sender here, as they're only paying for the "final" exact output
         // swap, which happens first, and subsequent swaps are paid for within nested callback frames
         exactOutputInternal(
@@ -313,7 +342,8 @@ contract SwapRouter is
             SwapCallbackData({path: params.path, payer: msg.sender})
         );
 
-        amountIn = amountInCached;
+        // calculate the actual amount utilised for the trade
+        amountIn = balanceBefore - IERC20(tokenIn).balanceOf(msg.sender);
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
     }
