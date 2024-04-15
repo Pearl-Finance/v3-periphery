@@ -5,6 +5,8 @@ pragma abicoder v2;
 import '@uniswap/v3-core/contracts/libraries/SafeCast.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
+
 import './interfaces/IUniswapV3PoolExtended.sol';
 
 import './interfaces/ISwapRouter.sol';
@@ -26,7 +28,8 @@ contract SwapRouter is
     PeripheryValidation,
     PeripheryPaymentsWithFee,
     Multicall,
-    SelfPermit
+    SelfPermit,
+    ReentrancyGuard
 {
     using Path for bytes;
     using SafeCast for uint256;
@@ -142,6 +145,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -153,10 +157,14 @@ contract SwapRouter is
                 isFeeOnTransfer: false
             });
 
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
         amountOut = exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
+
+        // calculate the actual amount recieved by the user
+        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -165,6 +173,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -176,11 +185,15 @@ contract SwapRouter is
                 isFeeOnTransfer: true
             });
 
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
+
         amountOut = exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
 
+        // calculate the actual amount recieved by the user
+        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -189,6 +202,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -200,6 +214,7 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountOut)
     {
@@ -285,9 +300,12 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
+        uint256 balanceBefore = IERC20(params.tokenIn).balanceOf(msg.sender);
+
         // avoid an SLOAD by using the swap return data
         amountIn = exactOutputInternal(
             params.amountOut,
@@ -296,6 +314,8 @@ contract SwapRouter is
             SwapCallbackData({path: abi.encodePacked(params.tokenOut, params.fee, params.tokenIn), payer: msg.sender})
         );
 
+        // calculate the actual amount utilised for the trade
+        amountIn = balanceBefore - IERC20(params.tokenIn).balanceOf(msg.sender);
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         // has to be reset even though we don't use it in the single hop case
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
@@ -306,9 +326,13 @@ contract SwapRouter is
         external
         payable
         override
+        nonReentrant
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
+        (, address tokenIn, ) = params.path.decodeFirstPool();
+        uint256 balanceBefore = IERC20(tokenIn).balanceOf(msg.sender);
+
         // it's okay that the payer is fixed to msg.sender here, as they're only paying for the "final" exact output
         // swap, which happens first, and subsequent swaps are paid for within nested callback frames
         exactOutputInternal(
@@ -318,7 +342,8 @@ contract SwapRouter is
             SwapCallbackData({path: params.path, payer: msg.sender})
         );
 
-        amountIn = amountInCached;
+        // calculate the actual amount utilised for the trade
+        amountIn = balanceBefore - IERC20(tokenIn).balanceOf(msg.sender);
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
     }
