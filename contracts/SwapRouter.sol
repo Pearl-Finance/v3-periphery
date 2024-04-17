@@ -157,14 +157,14 @@ contract SwapRouter is
                 isFeeOnTransfer: false
             });
 
-        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(params.recipient);
         amountOut = exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
 
-        // calculate the actual amount recieved by the user
-        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
+        // calculate the actual amount recieved by the recipient
+        amountOut = IERC20(params.tokenOut).balanceOf(params.recipient) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -185,15 +185,15 @@ contract SwapRouter is
                 isFeeOnTransfer: true
             });
 
-        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(msg.sender);
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(params.recipient);
 
         amountOut = exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
 
-        // calculate the actual amount recieved by the user
-        amountOut = IERC20(params.tokenOut).balanceOf(msg.sender) - balanceBefore;
+        // calculate the actual amount recieved by the recipient
+        amountOut = IERC20(params.tokenOut).balanceOf(params.recipient) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -304,8 +304,6 @@ contract SwapRouter is
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
-        uint256 balanceBefore = IERC20(params.tokenIn).balanceOf(msg.sender);
-
         // avoid an SLOAD by using the swap return data
         amountIn = exactOutputInternal(
             params.amountOut,
@@ -314,8 +312,6 @@ contract SwapRouter is
             SwapCallbackData({path: abi.encodePacked(params.tokenOut, params.fee, params.tokenIn), payer: msg.sender})
         );
 
-        // calculate the actual amount utilised for the trade
-        amountIn = balanceBefore - IERC20(params.tokenIn).balanceOf(msg.sender);
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         // has to be reset even though we don't use it in the single hop case
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
@@ -330,9 +326,6 @@ contract SwapRouter is
         checkDeadline(params.deadline)
         returns (uint256 amountIn)
     {
-        (, address tokenIn, ) = params.path.decodeFirstPool();
-        uint256 balanceBefore = IERC20(tokenIn).balanceOf(msg.sender);
-
         // it's okay that the payer is fixed to msg.sender here, as they're only paying for the "final" exact output
         // swap, which happens first, and subsequent swaps are paid for within nested callback frames
         exactOutputInternal(
@@ -342,8 +335,7 @@ contract SwapRouter is
             SwapCallbackData({path: params.path, payer: msg.sender})
         );
 
-        // calculate the actual amount utilised for the trade
-        amountIn = balanceBefore - IERC20(tokenIn).balanceOf(msg.sender);
+        amountIn = amountInCached;
         require(amountIn <= params.amountInMaximum, 'Too much requested');
         amountInCached = DEFAULT_AMOUNT_IN_CACHED;
     }
