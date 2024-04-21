@@ -1,7 +1,13 @@
 import { Fixture } from 'ethereum-waffle'
 import { BigNumber, BigNumberish, constants, Contract, ContractTransaction, Wallet } from 'ethers'
 import { ethers, waffle } from 'hardhat'
-import { MockTimeNonfungiblePositionManager, TestERC20, TickLensTest } from '../typechain'
+import {
+  IPearlV2Factory,
+  IPearlV2Pool,
+  MockTimeNonfungiblePositionManager,
+  TestERC20,
+  TickLensTest,
+} from '../typechain'
 import completeFixture from './shared/completeFixture'
 import { FeeAmount, TICK_SPACINGS } from './shared/constants'
 import { encodePriceSqrt } from './shared/encodePriceSqrt'
@@ -14,11 +20,12 @@ describe('TickLens', () => {
   let wallets: Wallet[]
 
   const nftFixture: Fixture<{
-    factory: Contract
+    factory: IPearlV2Factory
+    poolImplementation: IPearlV2Pool
     nft: MockTimeNonfungiblePositionManager
     tokens: [TestERC20, TestERC20, TestERC20]
   }> = async (wallets, provider) => {
-    const { factory, tokens, nft } = await completeFixture(wallets, provider)
+    const { factory, poolImplementation, tokens, nft } = await completeFixture(wallets, provider)
 
     for (const token of tokens) {
       await token.approve(nft.address, constants.MaxUint256)
@@ -26,12 +33,14 @@ describe('TickLens', () => {
 
     return {
       factory,
+      poolImplementation,
       nft,
       tokens,
     }
   }
 
-  let factory: Contract
+  let factory: IPearlV2Factory
+  let poolImplementation: IPearlV2Pool
   let nft: MockTimeNonfungiblePositionManager
   let tokens: [TestERC20, TestERC20, TestERC20]
   let poolAddress: string
@@ -45,7 +54,7 @@ describe('TickLens', () => {
   })
 
   beforeEach('load fixture', async () => {
-    ;({ factory, tokens, nft } = await loadFixture(nftFixture))
+    ;({ factory, poolImplementation, tokens, nft } = await loadFixture(nftFixture))
   })
 
   describe('#getPopulatedTicksInWord', () => {
@@ -93,15 +102,19 @@ describe('TickLens', () => {
         deadline: 1,
       }
 
-      const { liquidity } = await nft.callStatic.mint(mintParams)
-
+      const { actualLiquidity } = await nft.callStatic.mint(mintParams)
       await nft.mint(mintParams)
-      return liquidity.toNumber()
+      return actualLiquidity.toNumber()
     }
 
     beforeEach(async () => {
       await createPool(tokens[0].address, tokens[1].address)
-      poolAddress = computePoolAddress(factory.address, [tokens[0].address, tokens[1].address], FeeAmount.MEDIUM)
+      poolAddress = computePoolAddress(
+        factory.address,
+        poolImplementation.address,
+        [tokens[0].address, tokens[1].address],
+        FeeAmount.MEDIUM
+      )
     })
 
     beforeEach(async () => {

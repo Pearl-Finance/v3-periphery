@@ -6,6 +6,7 @@ import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
 import './PeripheryImmutableState.sol';
 import '../interfaces/IPoolInitializer.sol';
+import '../interfaces/dex/IPearlV2Factory.sol';
 
 /// @title Creates and initializes V3 Pools
 abstract contract PoolInitializer is IPoolInitializer, PeripheryImmutableState {
@@ -21,11 +22,11 @@ abstract contract PoolInitializer is IPoolInitializer, PeripheryImmutableState {
 
         if (pool == address(0)) {
             pool = IUniswapV3Factory(factory).createPool(token0, token1, fee);
-            IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+            IPearlV2Factory(factory).initializePoolPrice(pool, sqrtPriceX96);
         } else {
             (uint160 sqrtPriceX96Existing, , , , , , ) = IUniswapV3Pool(pool).slot0();
             if (sqrtPriceX96Existing == 0) {
-                IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+                IPearlV2Factory(factory).initializePoolPrice(pool, sqrtPriceX96);
             }
         }
     }

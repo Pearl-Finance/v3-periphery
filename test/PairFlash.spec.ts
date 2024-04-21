@@ -12,6 +12,8 @@ import {
   NFTDescriptor,
   Quoter,
   SwapRouter,
+  IPearlV2Factory,
+  IPearlV2Pool,
 } from '../typechain'
 import completeFixture from './shared/completeFixture'
 import { FeeAmount, MaxUint128, TICK_SPACINGS } from './shared/constants'
@@ -31,7 +33,8 @@ describe('PairFlash test', () => {
   let nft: MockTimeNonfungiblePositionManager
   let token0: TestERC20
   let token1: TestERC20
-  let factory: IUniswapV3Factory
+  let factory: IPearlV2Factory
+  let poolImplementation: IPearlV2Pool
   let quoter: Quoter
 
   async function createPool(tokenAddressA: string, tokenAddressB: string, fee: FeeAmount, price: BigNumber) {
@@ -58,7 +61,7 @@ describe('PairFlash test', () => {
   }
 
   const flashFixture = async () => {
-    const { router, tokens, factory, weth9, nft } = await completeFixture(wallets, provider)
+    const { router, tokens, poolImplementation, factory, weth9, nft } = await completeFixture(wallets, provider)
     const token0 = tokens[0]
     const token1 = tokens[1]
 
@@ -73,6 +76,7 @@ describe('PairFlash test', () => {
       token1,
       flash,
       factory,
+      poolImplementation,
       weth9,
       nft,
       quoter,
@@ -87,7 +91,7 @@ describe('PairFlash test', () => {
   })
 
   beforeEach('load fixture', async () => {
-    ;({ factory, token0, token1, flash, nft, quoter } = await loadFixture(flashFixture))
+    ;({ factory, poolImplementation, token0, token1, flash, nft, quoter } = await loadFixture(flashFixture))
 
     await token0.approve(nft.address, MaxUint128)
     await token1.approve(nft.address, MaxUint128)
@@ -115,9 +119,24 @@ describe('PairFlash test', () => {
         fee3: FeeAmount.HIGH,
       }
       // pool1 is the borrow pool
-      const pool1 = computePoolAddress(factory.address, [token0.address, token1.address], FeeAmount.MEDIUM)
-      const pool2 = computePoolAddress(factory.address, [token0.address, token1.address], FeeAmount.LOW)
-      const pool3 = computePoolAddress(factory.address, [token0.address, token1.address], FeeAmount.HIGH)
+      const pool1 = computePoolAddress(
+        factory.address,
+        poolImplementation.address,
+        [token0.address, token1.address],
+        FeeAmount.MEDIUM
+      )
+      const pool2 = computePoolAddress(
+        factory.address,
+        poolImplementation.address,
+        [token0.address, token1.address],
+        FeeAmount.LOW
+      )
+      const pool3 = computePoolAddress(
+        factory.address,
+        poolImplementation.address,
+        [token0.address, token1.address],
+        FeeAmount.HIGH
+      )
 
       const expectedAmountOut0 = await quoter.callStatic.quoteExactInputSingle(
         token1.address,

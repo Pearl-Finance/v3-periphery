@@ -3,6 +3,8 @@ import '@nomiclabs/hardhat-ethers'
 import '@nomiclabs/hardhat-waffle'
 import '@nomiclabs/hardhat-etherscan'
 import 'hardhat-contract-sizer'
+import 'hardhat-deploy'
+import 'solidity-coverage'
 
 import * as dotenv from 'dotenv'
 dotenv.config({ path: __dirname + '/.env' })
@@ -52,7 +54,7 @@ const DEFAULT_COMPILER_SETTINGS = {
 export default {
   networks: {
     hardhat: {
-      allowUnlimitedContractSize: false,
+      allowUnlimitedContractSize: true,
     },
     mainnet: {
       url: `https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,

@@ -10,6 +10,8 @@ import {
   SwapRouter,
   TestERC20,
   TestPositionNFTOwner,
+  IPearlV2Factory,
+  IPearlV2Pool,
 } from '../typechain'
 import completeFixture from './shared/completeFixture'
 import { computePoolAddress } from './shared/computePoolAddress'
@@ -31,12 +33,13 @@ describe('NonfungiblePositionManager', () => {
 
   const nftFixture: Fixture<{
     nft: MockTimeNonfungiblePositionManager
-    factory: IUniswapV3Factory
+    factory: IPearlV2Factory
+    poolImplementation: IPearlV2Pool
     tokens: [TestERC20, TestERC20, TestERC20]
     weth9: IWETH9
     router: SwapRouter
   }> = async (wallets, provider) => {
-    const { weth9, factory, tokens, nft, router } = await completeFixture(wallets, provider)
+    const { weth9, factory, poolImplementation, tokens, nft, router } = await completeFixture(wallets, provider)
 
     // approve & fund wallets
     for (const token of tokens) {
@@ -48,13 +51,15 @@ describe('NonfungiblePositionManager', () => {
     return {
       nft,
       factory,
+      poolImplementation,
       tokens,
       weth9,
       router,
     }
   }
 
-  let factory: IUniswapV3Factory
+  let factory: IPearlV2Factory
+  let poolImplementation: IPearlV2Pool
   let nft: MockTimeNonfungiblePositionManager
   let tokens: [TestERC20, TestERC20, TestERC20]
   let weth9: IWETH9
@@ -70,7 +75,7 @@ describe('NonfungiblePositionManager', () => {
   })
 
   beforeEach('load fixture', async () => {
-    ;({ nft, factory, tokens, weth9, router } = await loadFixture(nftFixture))
+    ;({ nft, factory, poolImplementation, tokens, weth9, router } = await loadFixture(nftFixture))
   })
 
   it('bytecode size', async () => {
@@ -81,6 +86,7 @@ describe('NonfungiblePositionManager', () => {
     it('creates the pool at the expected address', async () => {
       const expectedAddress = computePoolAddress(
         factory.address,
+        poolImplementation.address,
         [tokens[0].address, tokens[1].address],
         FeeAmount.MEDIUM
       )
@@ -109,6 +115,7 @@ describe('NonfungiblePositionManager', () => {
     it('works if pool is created but not initialized', async () => {
       const expectedAddress = computePoolAddress(
         factory.address,
+        poolImplementation.address,
         [tokens[0].address, tokens[1].address],
         FeeAmount.MEDIUM
       )
@@ -126,14 +133,16 @@ describe('NonfungiblePositionManager', () => {
     it('works if pool is created and initialized', async () => {
       const expectedAddress = computePoolAddress(
         factory.address,
+        poolImplementation.address,
         [tokens[0].address, tokens[1].address],
         FeeAmount.MEDIUM
       )
       await factory.createPool(tokens[0].address, tokens[1].address, FeeAmount.MEDIUM)
       const pool = new ethers.Contract(expectedAddress, IUniswapV3PoolABI, wallet)
 
-      await pool.initialize(encodePriceSqrt(3, 1))
+      await factory.initializePoolPrice(pool.address, encodePriceSqrt(3, 1))
       const code = await wallet.provider.getCode(expectedAddress)
+
       expect(code).to.not.eq('0x')
       await nft.createAndInitializePoolIfNecessary(
         tokens[0].address,
@@ -494,6 +503,9 @@ describe('NonfungiblePositionManager', () => {
         amount1Min: 0,
         deadline: 1,
       })
+
+      // Approve nft 1
+      await nft.connect(other).approve(wallet.address, 1)
     })
 
     it('increases position liquidity', async () => {
@@ -735,7 +747,12 @@ describe('NonfungiblePositionManager', () => {
 
     it('transfers tokens owed from burn', async () => {
       await nft.connect(other).decreaseLiquidity({ tokenId, liquidity: 50, amount0Min: 0, amount1Min: 0, deadline: 1 })
-      const poolAddress = computePoolAddress(factory.address, [tokens[0].address, tokens[1].address], FeeAmount.MEDIUM)
+      const poolAddress = computePoolAddress(
+        factory.address,
+        poolImplementation.address,
+        [tokens[0].address, tokens[1].address],
+        FeeAmount.MEDIUM
+      )
       await expect(
         nft.connect(other).collect({
           tokenId,
@@ -1095,7 +1112,12 @@ describe('NonfungiblePositionManager', () => {
 
     it('executes all the actions', async () => {
       const pool = poolAtAddress(
-        computePoolAddress(factory.address, [tokens[0].address, tokens[1].address], FeeAmount.MEDIUM),
+        computePoolAddress(
+          factory.address,
+          poolImplementation.address,
+          [tokens[0].address, tokens[1].address],
+          FeeAmount.MEDIUM
+        ),
         wallet
       )
       await expect(
@@ -1240,6 +1262,7 @@ describe('NonfungiblePositionManager', () => {
       it('actually collected', async () => {
         const poolAddress = computePoolAddress(
           factory.address,
+          poolImplementation.address,
           [tokens[0].address, tokens[1].address],
           FeeAmount.MEDIUM
         )

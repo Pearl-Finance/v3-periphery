@@ -112,7 +112,7 @@ library NFTDescriptor {
         return
             string(
                 abi.encodePacked(
-                    'This NFT represents a liquidity position in a  Pearl V2 ',
+                    'This NFT represents a liquidity position in a Pearl V2 ',
                     quoteTokenSymbol,
                     '-',
                     baseTokenSymbol,

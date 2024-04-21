@@ -157,14 +157,16 @@ contract SwapRouter is
                 isFeeOnTransfer: false
             });
 
-        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(params.recipient);
+        address recipient = params.recipient == address(0) ? address(this) : params.recipient;
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(recipient);
+
         amountOut = exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
 
         // calculate the actual amount recieved by the recipient
-        amountOut = IERC20(params.tokenOut).balanceOf(params.recipient) - balanceBefore;
+        amountOut = IERC20(params.tokenOut).balanceOf(recipient) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 
@@ -185,7 +187,8 @@ contract SwapRouter is
                 isFeeOnTransfer: true
             });
 
-        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(params.recipient);
+        address recipient = params.recipient == address(0) ? address(this) : params.recipient;
+        uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(recipient);
 
         amountOut = exactInputInternal(
             inputParams,
@@ -193,7 +196,7 @@ contract SwapRouter is
         );
 
         // calculate the actual amount recieved by the recipient
-        amountOut = IERC20(params.tokenOut).balanceOf(params.recipient) - balanceBefore;
+        amountOut = IERC20(params.tokenOut).balanceOf(recipient) - balanceBefore;
         require(amountOut >= params.amountOutMinimum, 'Too little received');
     }
 

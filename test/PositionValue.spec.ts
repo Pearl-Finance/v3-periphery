@@ -8,6 +8,8 @@ import {
   IUniswapV3Pool,
   TestERC20,
   IUniswapV3Factory,
+  IPearlV2Pool,
+  IPearlV2Factory,
 } from '../typechain'
 import { FeeAmount, MaxUint128, TICK_SPACINGS } from './shared/constants'
 import { getMaxTick, getMinTick } from './shared/ticks'
@@ -29,9 +31,10 @@ describe('PositionValue', async () => {
     tokens: [TestERC20, TestERC20, TestERC20]
     nft: MockTimeNonfungiblePositionManager
     router: SwapRouter
-    factory: IUniswapV3Factory
+    factory: IPearlV2Factory
+    poolImplementation: IPearlV2Pool
   }> = async (wallets, provider) => {
-    const { nft, router, tokens, factory } = await completeFixture(wallets, provider)
+    const { nft, router, tokens, factory, poolImplementation } = await completeFixture(wallets, provider)
     const positionValueFactory = await ethers.getContractFactory('PositionValueTest')
     const positionValue = (await positionValueFactory.deploy()) as PositionValueTest
 
@@ -47,6 +50,7 @@ describe('PositionValue', async () => {
       nft,
       router,
       factory,
+      poolImplementation,
     }
   }
 
@@ -55,7 +59,8 @@ describe('PositionValue', async () => {
   let positionValue: PositionValueTest
   let nft: MockTimeNonfungiblePositionManager
   let router: SwapRouter
-  let factory: IUniswapV3Factory
+  let factory: IPearlV2Factory
+  let poolImplementation: IPearlV2Pool
 
   let amountDesired: BigNumberish
 
@@ -65,7 +70,9 @@ describe('PositionValue', async () => {
   })
 
   beforeEach(async () => {
-    ;({ positionValue, tokens, nft, router, factory } = await loadFixture(positionValueCompleteFixture))
+    ;({ positionValue, tokens, nft, router, factory, poolImplementation } = await loadFixture(
+      positionValueCompleteFixture
+    ))
     await nft.createAndInitializePoolIfNecessary(
       tokens[0].address,
       tokens[1].address,
@@ -73,7 +80,12 @@ describe('PositionValue', async () => {
       encodePriceSqrt(1, 1)
     )
 
-    const poolAddress = computePoolAddress(factory.address, [tokens[0].address, tokens[1].address], FeeAmount.MEDIUM)
+    const poolAddress = computePoolAddress(
+      factory.address,
+      poolImplementation.address,
+      [tokens[0].address, tokens[1].address],
+      FeeAmount.MEDIUM
+    )
     pool = new ethers.Contract(poolAddress, IUniswapV3PoolABI, wallets[0])
   })
 
