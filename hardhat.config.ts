@@ -72,6 +72,14 @@ export default {
       gasPrice: 20e9,
       gas: 25e6,
     },
+    real: {
+      chainId: 111188,
+      url: `${process.env.REAL_RPC_URL}`,
+      accounts:
+        process.env.PRIVATE_KEY !== undefined
+          ? [process.env.PRIVATE_KEY]
+          : { mnemonic: process.env.MNEMONIC as string },
+    },
     unreal: {
       chainId: 18233,
       url: `${process.env.UNREAL_RPC_URL}`,
@@ -107,8 +115,17 @@ export default {
       arbitrumSepolia: process.env.ARBISCAN_API_KEY,
       holesky: process.env.ETHERSCAN_API_KEY,
       unreal: 'abc',
+      real: 'abc',
     },
     customChains: [
+      {
+        network: 'real',
+        chainId: 111188,
+        urls: {
+          apiURL: process.env.REAL_API_URL,
+          browserURL: process.env.REAL_BROWSER_URL,
+        },
+      },
       {
         network: 'unreal',
         chainId: 18233,

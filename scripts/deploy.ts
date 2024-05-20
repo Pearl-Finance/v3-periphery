@@ -55,7 +55,7 @@ async function main() {
 
   //https://forum.openzeppelin.com/t/oz-hardhat-upgrades-unsafeallow-external-library-linking-error/38100
   const nFTDescriptorLibraryAddress = await deploy('NFTDescriptor').then((contract) => contract.address)
-  const desriptor = await deploy('NonfungibleTokenPositionDescriptor', [WETH9, asciiStringToBytes32('ETH')], [], {
+  const desriptor = await deploy('NonfungibleTokenPositionDescriptor', [WETH9, asciiStringToBytes32('REETH')], [], {
     libraries: { NFTDescriptor: nFTDescriptorLibraryAddress },
   })
   const positionManager = await deploy('NonfungiblePositionManager', [PearlV2Factory, WETH9, desriptor.address])

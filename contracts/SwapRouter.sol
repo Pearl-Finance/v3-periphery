@@ -160,7 +160,7 @@ contract SwapRouter is
         address recipient = params.recipient == address(0) ? address(this) : params.recipient;
         uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(recipient);
 
-        amountOut = exactInputInternal(
+        exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
@@ -190,7 +190,7 @@ contract SwapRouter is
         address recipient = params.recipient == address(0) ? address(this) : params.recipient;
         uint256 balanceBefore = IERC20(params.tokenOut).balanceOf(recipient);
 
-        amountOut = exactInputInternal(
+        exactInputInternal(
             inputParams,
             SwapCallbackData({path: abi.encodePacked(params.tokenIn, params.fee, params.tokenOut), payer: msg.sender})
         );
